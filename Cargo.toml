@@ -1,6 +1,6 @@
 [package]
 name = "qrush-engine"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["SNM Maurya <xsmmaurya@gmail.com>"]
 description = "Lightweight Job Queue and Task Scheduler for Rust (Actix + Redis + Cron)"
