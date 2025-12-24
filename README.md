@@ -1,4 +1,18 @@
-# QRush Engine — Client Application Integration Guide
+# QRush Engine
+
+[![Crates.io](https://img.shields.io/crates/v/qrush-engine)](https://crates.io/crates/qrush-engine)
+[![Documentation](https://docs.rs/qrush-engine/badge.svg)](https://docs.rs/qrush-engine)
+[![License](https://img.shields.io/crates/l/qrush-engine)](LICENSE)
+[![Downloads](https://img.shields.io/crates/d/qrush-engine)](https://crates.io/crates/qrush-engine)
+[![Recent Downloads](https://img.shields.io/crates/dr/qrush-engine)](https://crates.io/crates/qrush-engine)
+
+![QRushEngine](https://srotas-suite-space.s3.ap-south-1.amazonaws.com/sqrush.png)
+
+
+
+# QRush Engine Integration Guide (Actix Web)
+
+
 
 This document shows how to integrate **QRush Engine** in a client application and how to run the worker runtime.
 
