@@ -1,0 +1,344 @@
+{% extends "layout.html.tera" %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-2xl font-semibold">{{ title | default(value="Cron Jobs") }}</h1>
+  <button onclick="showCreateModal()" class="btn-primary">
+    ➕ Create Cron Job
+  </button>
+</div>
+
+<!-- Stats Cards -->
+<div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+  <div class="kpi">
+    <div class="kpi-title">Total Cron Jobs</div>
+    <div class="kpi-value">{{ cron_jobs | length }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-title">Enabled</div>
+    <div class="kpi-value text-green-600">
+      {% set enabled_count = 0 %}
+      {% for job in cron_jobs %}
+        {% if job.enabled %}
+          {% set_global enabled_count = enabled_count + 1 %}
+        {% endif %}
+      {% endfor %}
+      {{ enabled_count }}
+    </div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-title">Disabled</div>
+    <div class="kpi-value text-gray-500">{{ cron_jobs | length - enabled_count }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-title">Scheduler</div>
+    <div class="kpi-value text-blue-600">Running</div>
+  </div>
+</div>
+
+<!-- Cron Jobs Table -->
+<div class="card overflow-hidden">
+  <table class="table">
+    <thead class="bg-slate-50/60 dark:bg-slate-900/30">
+      <tr>
+        <th class="th">Name</th>
+        <th class="th">Queue</th>
+        <th class="th">Next Run</th>
+        <th class="th">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in cron_jobs %}
+      <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-900/30 cursor-pointer" onclick="toggleRow('{{ job.id }}')">
+        <td class="td font-medium">{{ job.name }}</td>
+        <td class="td">
+          <span class="chip-sky">{{ job.queue }}</span>
+        </td>
+        <td class="td">
+          <time class="text-sm font-medium">{{ job.next_run | date(format="%b %d, %Y %H:%M:%S UTC") }}</time>
+        </td>
+        <td class="td" onclick="event.stopPropagation()">
+          <div class="flex gap-2">
+            {% if job.enabled %}
+              <button onclick="cronAction('toggle', '{{ job.id }}', false)" 
+                      class="btn text-xs" title="Disable">
+                Pause
+              </button>
+            {% else %}
+              <button onclick="cronAction('toggle', '{{ job.id }}', true)" 
+                      class="btn text-xs" title="Enable">
+                Enable
+              </button>
+            {% endif %}
+            
+            <button onclick="runNow('{{ job.id }}')" 
+                    class="btn text-xs" title="Run Now">
+              Run
+            </button>
+            
+            <button onclick="cronAction('delete', '{{ job.id }}')" 
+                    class="btn-danger text-xs" title="Delete">
+              Delete
+            </button>
+          </div>
+        </td>
+      </tr>
+      <!-- Expandable details row -->
+      <tr id="details-{{ job.id }}" class="hidden bg-slate-25 dark:bg-slate-900/20">
+        <td colspan="4" class="td p-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">ID:</span>
+              <span class="font-mono text-xs ml-2">{{ job.id }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Name:</span>
+              <span class="ml-2">{{ job.name }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Queue:</span>
+              <span class="ml-2">{{ job.queue }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Cron Expression:</span>
+              <span class="font-mono text-xs ml-2">{{ job.cron_expression }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Status:</span>
+              {% if job.enabled %}
+                <span class="chip-green ml-2">Enabled</span>
+              {% else %}
+                <span class="chip-red ml-2">Disabled</span>
+              {% endif %}
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Timezone:</span>
+              <span class="ml-2">{{ job.timezone | default(value="UTC") }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Created At:</span>
+              <span class="ml-2">{{ job.created_at | date(format="%b %d, %Y %H:%M:%S UTC") }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-slate-600 dark:text-slate-400">Last Run:</span>
+              {% if job.last_run %}
+                <span class="ml-2">{{ job.last_run | date(format="%b %d, %Y %H:%M:%S UTC") }}</span>
+              {% else %}
+                <span class="text-gray-400 ml-2">Never</span>
+              {% endif %}
+            </div>
+            <div class="md:col-span-2">
+              <span class="font-medium text-slate-600 dark:text-slate-400">Job Payload:</span>
+              <pre class="mt-2 bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs overflow-auto max-h-32">{{ job.payload | default(value="{}") }}</pre>
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td class="td text-center py-8" colspan="4">
+          <div class="text-gray-500">
+            <div class="text-4xl mb-2">⏰</div>
+            <div class="font-medium">No cron jobs configured</div>
+            <div class="text-sm">Create your first scheduled job to get started</div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Create Cron Job Modal -->
+<div id="createModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden z-50">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="card max-w-md w-full p-6">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-semibold">Create Cron Job</h3>
+        <button onclick="hideCreateModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+      </div>
+      
+      <div id="createCronForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Job Name</label>
+          <input type="text" id="jobName" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                 placeholder="e.g., Daily Cleanup">
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium mb-1">Queue</label>
+          <input type="text" id="jobQueue" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                 placeholder="e.g., maintenance">
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium mb-1">Cron Expression</label>
+          <input type="text" id="cronExpression" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                 placeholder="e.g., 0 0 2 * * * (daily at 2 AM)">
+          <div class="text-xs text-gray-500 mt-1">
+            Format: "sec min hour day month weekday"
+          </div>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium mb-1">Job Type</label>
+          <select id="jobType" required 
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            <option value="">Select Job Type</option>
+            <option value="CleanupJob">Cleanup Job</option>
+            <option value="ReportJob">Report Job</option>
+            <option value="BackupJob">Backup Job</option>
+          </select>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium mb-1">Job Parameters (JSON)</label>
+          <textarea id="jobPayload" rows="3" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                    placeholder='{"target": "temp_files"}'></textarea>
+        </div>
+        
+        <div class="flex gap-2 pt-2">
+          <button onclick="createCronJob()" class="btn-primary flex-1">Create Cron Job</button>
+          <button onclick="hideCreateModal()" class="btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Common Cron Expressions Help -->
+<div class="card p-4 mt-6">
+  <h3 class="font-medium mb-3">Common Cron Expressions</h3>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+    <div class="flex justify-between">
+      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">0 * * * * *</code>
+      <span class="text-gray-600">Every minute</span>
+    </div>
+    <div class="flex justify-between">
+      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">0 */5 * * * *</code>
+      <span class="text-gray-600">Every 5 minutes</span>
+    </div>
+    <div class="flex justify-between">
+      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">0 0 * * * *</code>
+      <span class="text-gray-600">Every hour</span>
+    </div>
+    <div class="flex justify-between">
+      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">0 0 0 * * *</code>
+      <span class="text-gray-600">Daily at midnight</span>
+    </div>
+    <div class="flex justify-between">
+      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">0 0 0 * * 1</code>
+      <span class="text-gray-600">Every Monday</span>
+    </div>
+    <div class="flex justify-between">
+      <code class="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">0 0 0 1 * *</code>
+      <span class="text-gray-600">First day of month</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// Toggle expandable row
+function toggleRow(jobId) {
+  const detailsRow = document.getElementById(`details-${jobId}`);
+  detailsRow.classList.toggle('hidden');
+}
+
+// Cron job actions
+async function cronAction(action, jobId, enabled = null) {
+  const payload = { action, job_id: jobId };
+  if (enabled !== null) payload.enabled = enabled;
+  
+  try {
+    const response = await fetch('/qrush/metrics/cron/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (response.ok) {
+      location.reload();
+    } else {
+      const error = await response.json();
+      alert('Action failed: ' + (error.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Network error occurred');
+  }
+}
+
+// Run job immediately
+async function runNow(jobId) {
+  if (!confirm('Run this cron job immediately?')) return;
+  
+  try {
+    const response = await fetch('/qrush/metrics/cron/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'run_now', job_id: jobId })
+    });
+    
+    if (response.ok) {
+      alert('Job triggered successfully!');
+    } else {
+      alert('Failed to trigger job');
+    }
+  } catch (e) {
+    alert('Network error occurred');
+  }
+}
+
+// Modal functions
+function showCreateModal() {
+  document.getElementById('createModal').classList.remove('hidden');
+}
+
+function hideCreateModal() {
+  document.getElementById('createModal').classList.add('hidden');
+  document.getElementById('jobName').value = '';
+  document.getElementById('jobQueue').value = '';
+  document.getElementById('cronExpression').value = '';
+  document.getElementById('jobType').value = '';
+  document.getElementById('jobPayload').value = '';
+}
+
+// Create cron job
+async function createCronJob() {
+  const payload = {
+    name: document.getElementById('jobName').value,
+    queue: document.getElementById('jobQueue').value,
+    cron_expression: document.getElementById('cronExpression').value,
+    job_type: document.getElementById('jobType').value,
+    payload: JSON.parse(document.getElementById('jobPayload').value || '{}')
+  };
+  
+  try {
+    const response = await fetch('/qrush/metrics/cron/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (response.ok) {
+      hideCreateModal();
+      location.reload();
+    } else {
+      const error = await response.json();
+      alert('Failed to create cron job: ' + (error.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Network error occurred');
+  }
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    hideCreateModal();
+  }
+});
+</script>
+{% endblock content %}

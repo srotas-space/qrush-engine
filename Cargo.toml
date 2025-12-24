@@ -1,0 +1,44 @@
+[package]
+name = "qrush-engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["SNM Maurya <xsmmaurya@gmail.com>"]
+description = "Lightweight Job Queue and Task Scheduler for Rust (Actix + Redis + Cron)"
+license = "MIT"
+repository = "https://github.com/srotas-space/qrush-engine"
+documentation = "https://docs.rs/qrush-engine"
+readme = "README.md"
+keywords = ["redis", "job-queue", "background-jobs", "cron", "sidekiq"]
+categories = ["asynchronous", "concurrency"]
+homepage = "https://srotas.space"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "qrush-engine"
+path = "src/bin/qrush_engine.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.8"
+cron = "0.12"
+clap = { version = "4", features = ["derive", "env"] }
+colored = "3"
+csv = "1"
+dotenvy = "0.15"
+futures = "0.3"
+futures-util = "0.3"
+nanoid = "0.4"
+once_cell = "1"
+redis = { version = "0.30", features = ["tokio-comp"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tera = "1.20"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+actix-web = "4"
