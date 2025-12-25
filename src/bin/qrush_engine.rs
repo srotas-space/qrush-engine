@@ -25,8 +25,8 @@ use qrush_engine::config::{trigger_shutdown, QueueConfig};
 #[derive(Parser, Debug)]
 #[command(name = "qrush-engine", version, about = "Sidekiq-style worker runtime for QRush")]
 struct Args {
-    /// Redis connection URL (also supports env QRUSH_REDIS_URL / REDIS_URL)
-    #[arg(long, env = "QRUSH_REDIS_URL", default_value = "redis://127.0.0.1:6379")]
+    /// Redis connection URL (also supports env QRUSH_ENGINE_REDIS_URL / REDIS_URL)
+    #[arg(long, env = "QRUSH_ENGINE_REDIS_URL", default_value = "redis://127.0.0.1:6379")]
     redis: String,
 
     /// Queue list, optionally with concurrency and priority:
@@ -78,8 +78,8 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // Support REDIS_URL if user didn't set QRUSH_REDIS_URL explicitly.
-    let redis_url = std::env::var("QRUSH_REDIS_URL")
+    // Support REDIS_URL if user didn't set QRUSH_ENGINE_REDIS_URL explicitly.
+    let redis_url = std::env::var("QRUSH_ENGINE_REDIS_URL")
         .or_else(|_| std::env::var("REDIS_URL"))
         .unwrap_or_else(|_| args.redis.clone());
 

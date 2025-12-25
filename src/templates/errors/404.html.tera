@@ -3,6 +3,6 @@
 <div class="card p-8 text-center">
   <div class="text-6xl mb-2">404</div>
   <p class="text-slate-600 dark:text-slate-400 mb-6">Page not found.</p>
-  <a class="btn-primary" href="/metrics">Back to metrics</a>
+  <a class="btn-primary" href="/qrush-engine/metrics">Back to metrics</a>
 </div>
 {% endblock content %}

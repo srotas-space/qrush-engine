@@ -1,4 +1,4 @@
-// /Users/snm/ws/xsnm/ws/crates/qrush-engine/src/utils/constants.rs
+// /Users/xsm/ws/xxsm/ws/crates/qrush-engine/src/utils/constants.rs
 
 // ---------------------------------------------------------
 // General
@@ -10,16 +10,16 @@ pub const DEFAULT_LIMIT: usize = 10;
 // ---------------------------------------------------------
 // Redis Keys
 // ---------------------------------------------------------
-pub const DELAYED_JOBS_KEY: &str = "qrush:delayed_jobs";
+pub const DELAYED_JOBS_KEY: &str = "qrush_engine:delayed_jobs";
 
 // Prefixes
-pub const PREFIX_QUEUE: &str = "qrush:queue";
-pub const PREFIX_JOB: &str = "qrush:job";
+pub const PREFIX_QUEUE: &str = "qrush_engine:queue";
+pub const PREFIX_JOB: &str = "qrush_engine:job";
 
 // Cron
-pub const CRON_JOBS_KEY: &str = "qrush:cron:jobs";              // HASH  id -> json(meta)
-pub const CRON_SCHEDULE_KEY: &str = "qrush:cron:schedule";      // ZSET  score=unix_ts, member=id
-pub const CRON_JOBS_META_KEY: &str = "qrush:cron:jobs:meta";    // HASH  id:enabled -> "0|1" (optional)
+pub const CRON_JOBS_KEY: &str = "qrush_engine:cron:jobs";              // HASH  id -> json(meta)
+pub const CRON_SCHEDULE_KEY: &str = "qrush_engine:cron:schedule";      // ZSET  score=unix_ts, member=id
+pub const CRON_JOBS_META_KEY: &str = "qrush_engine:cron:jobs:meta";    // HASH  id:enabled -> "0|1" (optional)
 
 // ---------------------------------------------------------
 // Cron Worker

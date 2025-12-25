@@ -1,4 +1,4 @@
-// /Users/xsm/Documents/workspace/XSM/crates/qrush/src/services/metrics_service.rs
+// /Users/snm/ws/xsnm/ws/crates/qrush-engine/src/services/metrics_service.rs
 use actix_web::{web, HttpResponse, Responder};
 use tera::Context;
 use redis::AsyncCommands;
@@ -34,13 +34,13 @@ pub async fn render_metrics(query: web::Query<MetricsQuery>) -> impl Responder {
     };
 
     // Fetch queues with jobs
-    let active_queues: Vec<String> = conn.smembers("snm:queues").await.unwrap_or_default();
+    let active_queues: Vec<String> = conn.smembers("xsm:queues").await.unwrap_or_default();
     
     // Get configured queues from Redis config keys
-    let config_keys: Vec<String> = conn.keys("snm:queue:config:*").await.unwrap_or_default();
+    let config_keys: Vec<String> = conn.keys("xsm:queue:config:*").await.unwrap_or_default();
     let configured_queues: Vec<String> = config_keys
         .into_iter()
-        .filter_map(|key| key.strip_prefix("snm:queue:config:").map(String::from))
+        .filter_map(|key| key.strip_prefix("xsm:queue:config:").map(String::from))
         .collect();
     
     // Merge and deduplicate queues (configured queues take priority)
@@ -79,10 +79,10 @@ pub async fn render_metrics(query: web::Query<MetricsQuery>) -> impl Responder {
     let mut total_pending = 0;
 
     for queue in &paginated_queues {
-        let success_key = format!("snm:success:{}", queue);
-        let failed_key = format!("snm:failed:{}", queue);
-        let retry_key = format!("snm:retry:{}", queue);
-        let pending_key = format!("snm:queue:{}", queue);
+        let success_key = format!("xsm:success:{}", queue);
+        let failed_key = format!("xsm:failed:{}", queue);
+        let retry_key = format!("xsm:retry:{}", queue);
+        let pending_key = format!("xsm:queue:{}", queue);
 
         let success: usize = conn.llen(&success_key).await.unwrap_or(0);
         let failed: usize = conn.llen(&failed_key).await.unwrap_or(0);
@@ -146,7 +146,7 @@ pub async fn render_metrics_for_queue(
         Err(_) => return HttpResponse::InternalServerError().body("Redis error"),
     };
 
-    let key = format!("snm:queue:{}", queue);
+    let key = format!("xsm:queue:{}", queue);
 
     let all_jobs: Vec<String> = match conn.lrange(&key, 0, -1).await {
         Ok(jobs) => jobs,
@@ -199,14 +199,14 @@ pub async fn render_scheduled_jobs(query: web::Query<PaginationQuery>) -> impl R
 
     let now = Utc::now().timestamp();
     let job_ids: Vec<String> = conn
-        .zrangebyscore("snm:delayed", 0, now)
+        .zrangebyscore("xsm:delayed", 0, now)
         .await
         .unwrap_or_default();
 
     let mut job_infos = Vec::new();
 
     for jid in job_ids {
-        if let Ok(data) = conn.get::<_, String>(format!("snm:job:{}", jid)).await {
+        if let Ok(data) = conn.get::<_, String>(format!("xsm:job:{}", jid)).await {
             if let Some(job) = deserialize_job(data).await {
                 job_infos.push(to_job_info(&job, &jid)); // ✅ Fixed: provide both arguments
             }
@@ -299,7 +299,7 @@ pub async fn render_dead_jobs(query: web::Query<PaginationQuery>) -> impl Respon
     };
 
     // 2. Fetch all failed job IDs
-    let all_jobs: Vec<String> = match conn.lrange("snm:failed_jobs", 0, -1).await {
+    let all_jobs: Vec<String> = match conn.lrange("xsm:failed_jobs", 0, -1).await {
         Ok(jobs) => jobs,
         Err(e) => {
             tracing::error!("Failed to read failed_jobs list: {:?}", e);
@@ -360,13 +360,13 @@ pub async fn render_worker_status() -> impl Responder {
         Err(_) => return HttpResponse::InternalServerError().body("Redis error"),
     };
 
-    let keys: Vec<String> = conn.keys("snm:worker:*").await.unwrap_or_default();
+    let keys: Vec<String> = conn.keys("xsm:worker:*").await.unwrap_or_default();
     let mut workers = Vec::new();
 
     for key in keys {
         if let Ok(status_json) = conn.get::<_, String>(&key).await {
             if let Ok(mut status) = serde_json::from_str::<WorkerStatus>(&status_json) {
-                status.id = key.replace("snm:worker:", "");
+                status.id = key.replace("xsm:worker:", "");
                 workers.push(status);
             }
         }
@@ -389,14 +389,14 @@ pub async fn job_action(payload: web::Json<serde_json::Value>) -> impl Responder
 
     let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("");
     let job_id = payload.get("job_id").and_then(|j| j.as_str()).unwrap_or("");
-    let job_key = format!("snm:job:{}", job_id);
+    let job_key = format!("xsm:job:{}", job_id);
 
     match action {
         "delete" => {
             if conn.exists(&job_key).await.unwrap_or(false) {
                 let _: () = conn.del(&job_key).await.unwrap_or_default();
-                let _: () = conn.lpush("snm:logs:default", format!("[{}] 🗑️ Job {} deleted", Utc::now(), job_id)).await.unwrap_or_default();
-                let _: () = conn.ltrim("snm:logs:default", 0, 99).await.unwrap_or_default();
+                let _: () = conn.lpush("xsm:logs:default", format!("[{}] 🗑️ Job {} deleted", Utc::now(), job_id)).await.unwrap_or_default();
+                let _: () = conn.ltrim("xsm:logs:default", 0, 99).await.unwrap_or_default();
                 HttpResponse::Ok().json(json!({"status": "deleted"}))
             } else {
                 HttpResponse::NotFound().json(json!({"error": "job not found"}))
@@ -445,18 +445,18 @@ pub async fn get_metrics_summary() -> impl Responder {
         Err(_) => return HttpResponse::InternalServerError().body("Redis error"),
     };
 
-    let total_jobs: usize = conn.get("snm:qrush:total_jobs").await.unwrap_or(0);
-    let success_jobs: usize = conn.get("snm:qrush:success").await.unwrap_or(0);
-    let failed_jobs: usize = conn.get("snm:qrush:failed").await.unwrap_or(0);
+    let total_jobs: usize = conn.get("xsm:qrush:total_jobs").await.unwrap_or(0);
+    let success_jobs: usize = conn.get("xsm:qrush:success").await.unwrap_or(0);
+    let failed_jobs: usize = conn.get("xsm:qrush:failed").await.unwrap_or(0);
 
-    let queues: Vec<String> = conn.smembers("snm:queues").await.unwrap_or_default();
+    let queues: Vec<String> = conn.smembers("xsm:queues").await.unwrap_or_default();
     let mut scheduled_jobs = 0;
     for queue in &queues {
-        let len: usize = conn.llen(format!("snm:queue:{}", queue)).await.unwrap_or(0);
+        let len: usize = conn.llen(format!("xsm:queue:{}", queue)).await.unwrap_or(0);
         scheduled_jobs += len;
     }
 
-    let worker_keys: Vec<String> = conn.keys("snm:worker:*").await.unwrap_or_default();
+    let worker_keys: Vec<String> = conn.keys("xsm:worker:*").await.unwrap_or_default();
     let active_workers = worker_keys.len();
 
     // Collect last 7 days stats
@@ -468,8 +468,8 @@ pub async fn get_metrics_summary() -> impl Responder {
         let day = Utc::now().date_naive() - Duration::days(i);
         let date_str = day.format("%Y-%m-%d").to_string();
 
-        let total_key = format!("snm:stats:jobs:{}", date_str);
-        let failed_key = format!("snm:stats:jobs:{}:failed", date_str);
+        let total_key = format!("xsm:stats:jobs:{}", date_str);
+        let failed_key = format!("xsm:stats:jobs:{}:failed", date_str);
 
         let total: usize = conn.get(&total_key).await.unwrap_or(0);
         let failed: usize = conn.get(&failed_key).await.unwrap_or(0);
@@ -499,56 +499,6 @@ pub async fn get_metrics_summary() -> impl Responder {
 }
 
 
-// pub async fn get_metrics_summary() -> impl Responder {
-//     let mut conn = match get_redis_connection().await {
-//         Ok(c) => c,
-//         Err(_) => return HttpResponse::InternalServerError().body("Redis error"),
-//     };
-
-//     let total_jobs: usize = conn.get("snm:qrush:total_jobs").await.unwrap_or(0);
-//     let failed_jobs: usize = conn.get("snm:qrush:failed").await.unwrap_or(0);
-
-//     let queues: Vec<String> = conn.smembers("snm:queues").await.unwrap_or_default();
-//     let mut scheduled_jobs = 0;
-//     for queue in &queues {
-//         let len: usize = conn.llen(format!("snm:queue:{}", queue)).await.unwrap_or(0);
-//         scheduled_jobs += len;
-//     }
-
-//     let worker_keys: Vec<String> = conn.keys("snm:worker:*").await.unwrap_or_default();
-//     let active_workers = worker_keys.len();
-
-//     // REAL chart data from last 7 days
-//     let mut chart_labels = Vec::new();
-//     let mut chart_data = Vec::new();
-
-//     for i in (0..7).rev() {
-//         let day = Utc::now().date_naive() - Duration::days(i);
-//         let date_str = day.format("%Y-%m-%d").to_string();
-//         let redis_key = format!("snm:stats:jobs:{}", date_str);
-
-//         let count: usize = conn.get(&redis_key).await.unwrap_or(0);
-//         chart_labels.push(day.format("%a").to_string()); // "Mon", "Tue", etc.
-//         chart_data.push(count);
-//     }
-
-//     let mut ctx = Context::new();
-//     ctx.insert("title", "Metrics Summary");
-//     ctx.insert("stats", &json!({
-//         "total_jobs": total_jobs,
-//         "failed_jobs": failed_jobs,
-//         "scheduled_jobs": scheduled_jobs,
-//         "active_workers": active_workers
-//     }));
-//     ctx.insert("chart", &json!({
-//         "labels": chart_labels,
-//         "data": chart_data
-//     }));
-
-//     render_template("summary.html.tera", ctx).await
-// }
-
-
 
 pub async fn export_queue_csv(path: web::Path<String>) -> impl Responder {
     let queue = path.into_inner();
@@ -560,7 +510,7 @@ pub async fn export_queue_csv(path: web::Path<String>) -> impl Responder {
         }
     };
 
-    let key = format!("snm:queue:{}", queue);
+    let key = format!("xsm:queue:{}", queue);
     let jobs: Vec<String> = match conn.lrange(&key, 0, -1).await {
         Ok(j) => j,
         Err(e) => {
@@ -626,12 +576,12 @@ pub async fn render_failed_jobs(query: web::Query<PaginationQuery>) -> impl Resp
     };
 
     // Collect all queues
-    let queues: Vec<String> = conn.smembers("snm:queues").await.unwrap_or_default();
+    let queues: Vec<String> = conn.smembers("xsm:queues").await.unwrap_or_default();
 
     // Aggregate failed job IDs from all queues
     let mut all_jobs: Vec<String> = Vec::new();
     for queue in &queues {
-        let key = format!("snm:failed:{}", queue);
+        let key = format!("xsm:failed:{}", queue);
         let ids: Vec<String> = conn.lrange(&key, 0, -1).await.unwrap_or_default();
         all_jobs.extend(ids);
     }
@@ -688,12 +638,12 @@ pub async fn render_retry_jobs(query: web::Query<PaginationQuery>) -> impl Respo
     };
 
     // Collect all queues
-    let queues: Vec<String> = conn.smembers("snm:queues").await.unwrap_or_default();
+    let queues: Vec<String> = conn.smembers("xsm:queues").await.unwrap_or_default();
 
     // Aggregate retry job IDs from all queues
     let mut all_jobs: Vec<String> = Vec::new();
     for queue in &queues {
-        let key = format!("snm:retry:{}", queue);
+        let key = format!("xsm:retry:{}", queue);
         let ids: Vec<String> = conn.lrange(&key, 0, -1).await.unwrap_or_default();
         all_jobs.extend(ids);
     }
@@ -736,4 +686,6 @@ pub async fn render_retry_jobs(query: web::Query<PaginationQuery>) -> impl Respo
 
     render_template("retry_jobs.html.tera", ctx).await
 }
+
+
 

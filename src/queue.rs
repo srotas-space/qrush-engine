@@ -35,7 +35,7 @@ where
     ]).await?;
 
     conn.rpush::<_, _, ()>(&queue_key, &job_id).await?;
-    conn.sadd::<_, _, ()>("snm:queues", queue).await?;
+    conn.sadd::<_, _, ()>("xsm:queues", queue).await?;
 
     println!("✅ Enqueued job: {} in queue: {}", job_id, queue);
     Ok(job_id)
@@ -66,7 +66,7 @@ where
     ]).await?;
 
     conn.zadd::<_, _, _, ()>(DELAYED_JOBS_KEY, &job_id, run_at).await?;
-    conn.sadd::<_, _, ()>("snm:queues", queue).await?;
+    conn.sadd::<_, _, ()>("xsm:queues", queue).await?;
 
     println!("⏳ Scheduled job: {} to run at: {}", job_id, run_at);
     Ok(job_id)
@@ -93,7 +93,7 @@ pub async fn enqueue_raw(queue: &str, payload: String) -> anyhow::Result<String>
     ]).await?;
 
     conn.rpush::<_, _, ()>(&queue_key, &job_id).await?;
-    conn.sadd::<_, _, ()>("snm:queues", queue).await?;
+    conn.sadd::<_, _, ()>("xsm:queues", queue).await?;
 
     Ok(job_id)
 }

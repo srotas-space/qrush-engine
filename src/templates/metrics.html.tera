@@ -61,7 +61,7 @@
                 <td class="px-4 py-2 text-green-600 dark:text-green-400">{{ queue.success }}</td>
                 <td class="px-4 py-2 text-red-600 dark:text-red-400">{{ queue.failed }}</td>
                 <td class="px-4 py-2">
-                  <a href="/qrush/metrics/queues/{{ queue.name }}"
+                  <a href="/qrush-engine/metrics/queues/{{ queue.name }}"
                     class="text-sm text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-full transition">
                     View Jobs
                   </a>

@@ -131,12 +131,12 @@ Recommended layout:
 
 ```
 src/
-  qrushesengines/
+  qengines/
     mod.rs
     initiate.rs
     jobs/
       mod.rs
-      notify_user.rs
+      notify_user_job.rs
     crons/
       mod.rs
       daily_report_job.rs
@@ -145,7 +145,7 @@ src/
 
 ---
 
-## `src/qrushesengines/mod.rs`
+## `src/qengines/mod.rs`
 
 ```rust
 pub mod initiate;
@@ -155,46 +155,25 @@ pub mod crons;
 
 ---
 
-## `src/qrushesengines/initiate.rs`
 
-This is the single place where you register **all jobs** + **cron jobs**.
+## `src/qengines/initiate.rs`
 
 ```rust
-use anyhow::Result;
+use actix_web::web;
+use std::sync::Arc;
+use tokio::sync::{Notify, OnceCell};
+use qrush_engine::config::{QueueConfig, QUEUE_INITIALIZED, set_basic_auth, QrushBasicAuthConfig};
 use qrush_engine::registry::register_job;
 use qrush_engine::cron::cron_scheduler::CronScheduler;
+use qrush_engine::routes::metrics_route::qrush_metrics_routes;
+use crate::qengines::jobs::notify_user_job::NotifyUserJob;
+use crate::qengines::crons::daily_report_job::DailyReportJob;
+use nanoid::nanoid;
 
-use crate::qrushesengines::jobs::notify_user::NotifyUser;
-use crate::qrushesengines::crons::daily_report_job::DailyReportJob;
+// Integrated-specific initialization tracker
+static QRUSH_INIT: OnceCell<Arc<Notify>> = OnceCell::const_new();
 
 pub struct QrushEngine;
-
-impl QrushEngine {
-    pub async fn initialize(_basic_auth: Option<qrush_engine::config::QrushBasicAuthConfig>) -> Result<()> {
-        // Register jobs
-        register_job(NotifyUser::name(), NotifyUser::handler);
-
-        // Register cron jobs (stores meta in Redis + schedules next tick)
-        let daily = DailyReportJob { report_type: "daily".to_string() };
-        CronScheduler::register_cron_job(daily).await?;
-
-        Ok(())
-    }
-
-    /// Optional: create a worker config object to attach to actix app data.
-    pub fn setup_worker_sync() -> QrushEngineWorkerConfig {
-        QrushEngineWorkerConfig {
-            worker_id: nanoid::nanoid!(),
-            initialized_at: std::time::SystemTime::now(),
-            integration_mode: "engine".to_string(),
-        }
-    }
-
-    /// Optional: mount QRush Engine routes (metrics etc.) into your Actix app.
-    pub fn configure_routes(cfg: &mut actix_web::web::ServiceConfig) {
-        qrush_engine::routes::metrics_route::qrush_metrics_routes(cfg);
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct QrushEngineWorkerConfig {
@@ -202,6 +181,296 @@ pub struct QrushEngineWorkerConfig {
     pub initialized_at: std::time::SystemTime,
     pub integration_mode: String,
 }
+
+impl QrushEngine {
+    /// 🌍 GLOBAL initialization - call this ONCE in main.rs
+    pub async fn initialize(basic_auth: Option<QrushBasicAuthConfig>) {
+        // Check if already initialized globally
+        if let Some(existing_notify) = QRUSH_INIT.get() {
+            println!("QRush already initialized globally (integrated mode), waiting for completion...");
+            existing_notify.notified().await;
+            return;
+        }
+
+        let queue_notify = Arc::new(Notify::new());
+        let _ = QRUSH_INIT.set(queue_notify.clone());
+
+        println!("🌍 Starting GLOBAL QRush initialization (INTEGRATED mode)...");
+
+        let basic_auth = basic_auth.or_else(|| {
+            std::env::var("QRUSH_ENGINE_BASIC_AUTH").ok().and_then(|auth| {
+                let parts: Vec<&str> = auth.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    Some(QrushBasicAuthConfig {
+                        username: parts[0].to_string(),
+                        password: parts[1].to_string(),
+                    })
+                } else {
+                    None
+                }
+            })
+        });
+
+        let _ = set_basic_auth(basic_auth);
+        let _ = QUEUE_INITIALIZED.set(queue_notify.clone());
+
+        // Register jobs globally
+        println!("Registering jobs for integrated mode...");
+        register_job(NotifyUserJob::name(), NotifyUserJob::handler);
+        register_job(DailyReportJob::name(), DailyReportJob::handler);
+
+        // Initialize queues in background
+        tokio::spawn({
+            let queue_notify = queue_notify.clone();
+            async move {
+                let redis_url = std::env::var("REDIS_URL")
+                    .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+
+                println!("Connecting to Redis: {}", redis_url);
+
+                let queues = vec![
+                    QueueConfig::new("default", 5, 1),
+                    QueueConfig::new("critical", 10, 0),
+                    QueueConfig::new("integrated", 3, 2), // Special queue for integrated mode
+                ];
+
+                if let Err(err) = QueueConfig::initialize(redis_url, queues).await {
+                    eprintln!("Failed to initialize qrush (integrated): {:?}", err);
+                } else {
+                    println!("QRush queues started successfully (integrated mode)");
+                }
+                
+                queue_notify.notify_waiters();
+            }
+        });
+        // Wait for queue initialization
+        queue_notify.notified().await;
+        println!("🚀 Global queue initialization complete (integrated mode)");
+        // Register cron jobs after queues are ready
+        Self::register_cron_jobs().await;
+        println!("🎯 GLOBAL QRush initialization complete (INTEGRATED mode)!");
+    }
+
+    /// Register cron jobs for integrated mode
+    async fn register_cron_jobs() {
+        println!("Registering integrated mode cron jobs...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        
+        let daily_report_job = DailyReportJob {
+            report_type: "integrated_report".to_string(),
+        };
+        
+        match CronScheduler::register_cron_job(daily_report_job).await {
+            Ok(_) => {
+                println!("DailyReportJob Cron Job registered for integrated mode");
+            }
+            Err(e) => {
+                println!("Failed to register integrated Cron Job: {:?}", e);
+            }
+        }
+    }
+
+
+    /*-----------------------------------------------------------
+    Utilities
+    ------------------------------------------------------------*/
+
+    // Generate nano uniq id
+    pub fn gen_uniq_nanoid() -> String {
+        nanoid!()
+    }
+
+    // WORKER setup - call this in each HttpServer::new()
+    // used for debugging/monitoring purposes
+    // fn test(qrush_worker_config: web::Data<QrushEngineWorkerConfig>)
+    pub fn setup_worker_sync() -> QrushEngineWorkerConfig {
+        let worker_id = Self::gen_uniq_nanoid();
+        println!("Setting up QRush integrated worker: {}", worker_id);
+        QrushEngineWorkerConfig {
+            worker_id,
+            initialized_at: std::time::SystemTime::now(),
+            integration_mode: "integrated".to_string(),
+        }
+    }
+
+    /// Get QRush metrics routes for integration into main app
+    pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+        println!("🔧 Configuring integrated QRush routes...");
+        qrush_metrics_routes(cfg);
+    }
+
+    /// Check if QRush is initialized
+    pub fn is_initialized() -> bool {
+        QRUSH_INIT.get().is_some()
+    }
+    /*-----------------------------------------------------------
+    Utilities
+    ------------------------------------------------------------*/
+}
+```
+
+---
+
+
+## `src/qengines/jobs/mod.rs`
+
+```rust
+pub mod notify_user_job;
+```
+
+---
+
+
+## `src/qengines/jobs/notify_user_job.rs`
+
+```rust
+use qrush_engine::job::Job;
+use async_trait::async_trait;
+use serde::{Serialize, Deserialize};
+use anyhow::{Result, Error};
+use futures::future::{BoxFuture, FutureExt};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotifyUserJob {
+    pub user_id: String,
+    pub message: String,
+}
+
+#[async_trait]
+impl Job for NotifyUserJob {
+    fn name(&self) -> &'static str {
+        "NotifyUserJob"
+    }
+
+    fn queue(&self) -> &'static str {
+        "default"
+    }
+
+    async fn before(&self) -> Result<()> {
+        println!("⏳ Before NotifyUserJob job for user: {}", self.user_id);
+        Ok(())
+    }
+
+    async fn perform(&self) -> Result<()> {
+        // Your code here
+        println!("📬 Performing NotifyUserJob: '{}' to user {}", self.message, self.user_id);
+        Ok(())
+    }
+
+    async fn after(&self) {
+        println!("✅ After NotifyUserJob job for user: {}", self.user_id);
+    }
+
+    async fn on_error(&self, err: &Error) {
+        eprintln!("❌ Error in NotifyUserJob job for user {}: {:?}", self.user_id, err);
+    }
+
+    async fn always(&self) {
+        println!("🔁 Always block executed for NotifyUserJob job");
+    }
+}
+
+
+impl NotifyUserJob {
+    pub fn name() -> &'static str {
+        "notify_user"
+    }
+
+    //  handler signature matching registry
+    pub fn handler(payload: String) -> BoxFuture<'static, Result<Box<dyn Job>>> {
+        async move {
+            let job: NotifyUserJob = serde_json::from_str(&payload)?;
+            Ok(Box::new(job) as Box<dyn Job>)
+        }
+        .boxed()
+    }
+}
+```
+
+---
+
+
+## `src/qengines/crons/mod.rs`
+
+```rust
+pub mod daily_report_job;
+```
+
+---
+
+## `src/qengines/crons/daily_report_job.rs`
+
+```rust
+use async_trait::async_trait;
+use futures::future::BoxFuture;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use qrush_engine::job::Job;
+use qrush_engine::cron::cron_job::CronJob;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DailyReportJob {
+    pub report_type: String,
+}
+
+#[async_trait]
+impl Job for DailyReportJob {
+    async fn perform(&self) -> Result<()> {
+        println!("Generating {} report...", self.report_type);
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        let text = format!("{} report generated successfully", self.report_type);
+        send_slack_notification(&text).await?;
+        println!("{} report generated successfully", self.report_type);
+        Ok(())
+    }
+
+    fn name(&self) -> &'static str { "DailyReportJob" }
+
+    fn queue(&self) -> &'static str { "default" }
+}
+
+#[async_trait]
+impl CronJob for DailyReportJob {
+    fn cron_expression(&self) -> &'static str {
+        "0 * * * * *"
+    }
+
+    fn cron_id(&self) -> &'static str { "daily_report" }
+}
+
+impl DailyReportJob {
+    pub fn name() -> &'static str { "DailyReportJob" }
+
+    pub fn handler(payload: String) -> BoxFuture<'static, Result<Box<dyn Job>>> {
+        Box::pin(async move {
+            let job: DailyReportJob = serde_json::from_str(&payload)?;
+            Ok(Box::new(job) as Box<dyn Job>)
+        })
+    }
+}
+
+
+
+
+async fn send_slack_notification(text: &str) -> Result<()> {
+    use anyhow::Context;
+
+    let webhook_url = std::env::var("SLACK_WEBHOOK_URL")
+        .context("SLACK_WEBHOOK_URL not set")?;
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({ "text": text });
+
+    let resp = client
+        .post(&webhook_url)
+        .json(&payload) // ✅ works because `json` feature is enabled
+        .send()
+        .await
+        .context("Failed to send request to Slack webhook")?;
+
+    Ok(())
+}
+
 ```
 
 ---
@@ -211,7 +480,7 @@ pub struct QrushEngineWorkerConfig {
 This includes exactly the usage you asked for:
 
 ```rust
-use crate::qrushesengines::initiate::QrushEngine;
+use crate::qengine::initiate::QrushEngine;
 
 QrushEngine::initialize(None).await;
 
@@ -226,60 +495,38 @@ let qrush_engine_worker_config = QrushEngine::setup_worker_sync();
 Complete `main.rs`:
 
 ```rust
-use actix_web::{web, App, HttpServer};
-use anyhow::Result;
-use tracing::info;
-use tracing_subscriber::EnvFilter;
+use actix_web::{web, App, HttpServer, HttpResponse, Responder, middleware::Logger};
+use dotenv::dotenv;
+use std::env;
+use crate::qengines::initiate::QrushEngine;
 
-use qrush_engine::config::QueueConfig;
+mod qengines;
 
-mod qrushesengines;
-use crate::qrushesengines::initiate::QrushEngine;
+
 
 #[actix_web::main]
-async fn main() -> Result<()> {
-    // Load .env if present
+async fn main() -> std::io::Result<()> {
     let _ = dotenvy::dotenv();
-
-    // Logs
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
-    // 1) Register jobs + cron metadata
-    QrushEngine::initialize(None).await?;
-
-    // 2) Start worker pools inside this process (Embedded mode)
-    //    If you're running a separate `qrush-engine` process, DO NOT call this here.
-    let redis_url = std::env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-
-    let queues = vec![
-        QueueConfig::new("default", 10, 1),
-        QueueConfig::new("critical", 25, 0),
-    ];
-
-    QueueConfig::initialize(redis_url, queues).await?;
-
-    // 3) Optional worker config (your style)
-    let qrush_engine_worker_config = QrushEngine::setup_worker_sync();
-
-    info!("Starting Actix server…");
-
+    
+    QrushEngine::initialize(None).await;
+    
     HttpServer::new(move || {
+        // Worker-specific setup - only enqueues jobs for this worker
+        let qrush_engine_worker_config = QrushEngine::setup_worker_sync();
+        
+
         App::new()
-            .app_data(web::Data::new(qrush_engine_worker_config.clone()))
-            // Mount QRush Engine routes
+            .app_data(web::Data::new(qrush_engine_worker_config))
+            .wrap(Logger::default())
+            // Qrush engine metrics routes
             .service(
                 web::scope("/qrush-engine")
                     .configure(|cfg| QrushEngine::configure_routes(cfg))
             )
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind("0.0.0.0:8080")?
     .run()
-    .await?;
-
-    Ok(())
+    .await
 }
 ```
 
@@ -333,16 +580,16 @@ RUST_LOG="info,qrush_engine=debug" qrush-engine --queues default:10
 
 ## Environment Variables
 
-- `QRUSH_REDIS_URL` (preferred)
+- `QRUSH_ENGINE_REDIS_URL` (preferred)
 - `REDIS_URL` (fallback)
-- `QRUSH_BASIC_AUTH` (optional `user:pass`)
+- `QRUSH_ENGINE_BASIC_AUTH` (optional `user:pass`)
 - `RUST_LOG`
 
 Example `.env`:
 
 ```env
-REDIS_URL=redis://127.0.0.1:6379
-QRUSH_BASIC_AUTH=qrush:password
+QRUSH_ENGINE_REDIS_URL=redis://127.0.0.1:6379
+QRUSH_ENGINE_BASIC_AUTH=qrush:password
 RUST_LOG=info
 ```
 
@@ -354,3 +601,61 @@ RUST_LOG=info
 - Prefer running worker runtime as a separate process for scaling and isolation.
 - Run multiple worker processes to increase throughput.
 - Use separate queues for critical vs background workloads.
+
+
+---
+
+## Common Cron Expressions
+
+- `"0 * * * * *"` - Every minute
+- `"0 */5 * * * *"` - Every 5 minutes  
+- `"0 0 * * * *"` - Every hour
+- `"0 0 0 * * *"` - Daily at midnight
+- `"0 0 0 * * 1"` - Every Monday
+- `"0 0 0 1 * *"` - First day of month
+
+---
+
+## Notes & tips
+
+- **Scheduling**: `enqueue_in(job, delay_secs)` uses seconds (integer), matching your test app.
+- **QueueConfig**: you used three queues (`default`, `critical`, `integrated`) with different concurrency/priority; tune as needed.
+- **CronJobs**: implement both `Job` and `CronJob` traits, register with `CronScheduler::register_cron_job()` after queue initialization, supports standard cron expressions with 6-field format (sec min hour day month weekday).
+- **Register jobs before init**: ensure `register_job(name, handler)` runs before workers start.
+- **Templates**: metrics UI uses Tera templates. If a Tera parse error occurs, restart the process (once_cell poison).
+- **Security**: protect metrics with Basic Auth via `QRUSH_ENGINE_BASIC_AUTH` or your own middleware.
+
+
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+
+## 🙏 Acknowledgments
+
+- Built with [Actix Web](https://actix.rs/) - Fast, powerful web framework
+- UI powered by [TailwindCSS](https://tailwindcss.com/) - Utility-first CSS framework
+
+
+---
+
+Made with ❤️ by the [Srotas Space] (https://srotas.space/open-source)
+
+---
+
+[![GitHub stars](https://img.shields.io/github/stars/srotas-space/qrush-engine?style=social)](https://github.com/srotas-space/qrush-engine)
+[![LinkedIn Follow](https://img.shields.io/badge/LinkedIn-Follow-blue?style=social&logo=linkedin)](https://www.linkedin.com/company/srotas-space)
+
+
+## Support
+
+- **Documentation**: [docs.rs/qrush-engine](https://docs.rs/qrush-engine)
+- **Issues**: [GitHub Issues](https://github.com/srotas-space/qrush-engine/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/srotas-space/qrush-engine/discussions)
+## qrush-engine (Sidekiq-style worker process)
+
+`qrush-engine` is the recommended way to run QRush in production: **a separate OS process** dedicated to executing jobs
+(similar to how Sidekiq runs separately from a Rails web server).

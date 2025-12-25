@@ -253,7 +253,7 @@ async function cronAction(action, jobId, enabled = null) {
   if (enabled !== null) payload.enabled = enabled;
   
   try {
-    const response = await fetch('/qrush/metrics/cron/action', {
+    const response = await fetch('/qrush-engine/metrics/cron/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -275,7 +275,7 @@ async function runNow(jobId) {
   if (!confirm('Run this cron job immediately?')) return;
   
   try {
-    const response = await fetch('/qrush/metrics/cron/action', {
+    const response = await fetch('/qrush-engine/metrics/cron/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'run_now', job_id: jobId })
@@ -316,7 +316,7 @@ async function createCronJob() {
   };
   
   try {
-    const response = await fetch('/qrush/metrics/cron/create', {
+    const response = await fetch('/qrush-engine/metrics/cron/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

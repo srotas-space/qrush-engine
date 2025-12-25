@@ -54,7 +54,7 @@ pub async fn deserialize_job(payload: String) -> Option<Box<dyn Job>> {
 }
 
 pub async fn fetch_job_info(job_id: &str) -> Result<Option<JobInfo>> {
-    let job_key = format!("snm:job:{job_id}");
+    let job_key = format!("xsm:job:{job_id}");
     let mut conn = get_redis_connection().await?;
 
     let map: redis::RedisResult<redis::Value> = conn.hgetall(&job_key).await;

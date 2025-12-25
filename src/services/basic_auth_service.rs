@@ -1,32 +1,25 @@
-// src/services/basic_auth_service.rs
-//
-// Optional Actix middleware for QRush metrics/routes.
-// Enabled when you embed qrush-engine routes into an Actix app.
-// (qrush-engine itself does not require Actix to run.)
-
+// qrush/src/services/basic_auth_service.rs
 use actix_web::{
-    body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    Error,
+    Error, HttpRequest, HttpResponse,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use futures_util::future::{ready, Either, Ready};
-use std::future::Ready as StdReady;
-
+use futures_util::future::{ready, Either, Ready}; // futures_util
+use std::future::Ready as StdReady;              // StdReady = for new_transform
 use crate::config::get_basic_auth;
 
 pub struct BasicAuthMiddleware;
 
-impl<S, B> Transform<S, ServiceRequest> for BasicAuthMiddleware
+impl<S> Transform<S, ServiceRequest> for BasicAuthMiddleware
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
-    B: actix_web::body::MessageBody + 'static,
+    S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
+    S::Future: 'static,
 {
-    type Response = ServiceResponse<EitherBody<B>>;
+    type Response = ServiceResponse;
     type Error = Error;
-    type Transform = BasicAuthMiddlewareService<S>;
     type InitError = ();
+    type Transform = BasicAuthMiddlewareService<S>;
     type Future = StdReady<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
@@ -38,58 +31,55 @@ pub struct BasicAuthMiddlewareService<S> {
     service: S,
 }
 
-impl<S, B> Service<ServiceRequest> for BasicAuthMiddlewareService<S>
+impl<S> Service<ServiceRequest> for BasicAuthMiddlewareService<S>
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
-    B: actix_web::body::MessageBody + 'static,
+    S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
+    S::Future: 'static,
 {
-    type Response = ServiceResponse<EitherBody<B>>;
+    type Response = ServiceResponse;
     type Error = Error;
-    type Future = Either<
-        futures_util::future::LocalBoxFuture<'static, Result<Self::Response, Self::Error>>,
-        Ready<Result<Self::Response, Self::Error>>,
-    >;
+
+    // Correct Future type: Either<Ready<Result<...>>, S::Future>
+    type Future = Either<Ready<Result<Self::Response, Self::Error>>, S::Future>;
 
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        // If no auth configured, allow.
-        let Some(cfg) = get_basic_auth() else {
-            let fut = self.service.call(req);
-            return Either::Left(Box::pin(async move {
-                let res = fut.await?;
-                Ok(res.map_into_left_body())
-            }));
-        };
+        if check_basic_auth(req.request()) {
+            Either::Right(self.service.call(req))
+        } else {
+            let response = req.into_response(unauthorized_response());
+            Either::Left(ready(Ok(response)))
+        }
+    }
+}
 
-        // Extract "Authorization: Basic base64(user:pass)"
-        let auth_hdr = req
-            .headers()
-            .get(actix_web::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        if let Some(encoded) = auth_hdr.strip_prefix("Basic ").map(str::trim) {
-            if let Ok(decoded) = STANDARD.decode(encoded) {
-                if let Ok(pair) = String::from_utf8(decoded) {
-                    let mut it = pair.splitn(2, ':');
-                    let user = it.next().unwrap_or("");
-                    let pass = it.next().unwrap_or("");
-                    if user == cfg.username && pass == cfg.password {
-                        let fut = self.service.call(req);
-                        return Either::Left(Box::pin(async move {
-                            let res = fut.await?;
-                            Ok(res.map_into_left_body())
-                        }));
+pub fn check_basic_auth(req: &HttpRequest) -> bool {
+    if let Some(config) = get_basic_auth() {
+        if let Some(auth_header) = req.headers().get("Authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if let Some(encoded) = auth_str.strip_prefix("Basic ") {
+                    if let Ok(decoded) = STANDARD.decode(encoded) {
+                        if let Ok(credentials) = std::str::from_utf8(&decoded) {
+                            let mut parts = credentials.splitn(2, ':');
+                            let user = parts.next().unwrap_or_default();
+                            let pass = parts.next().unwrap_or_default();
+                            if user == config.username && pass == config.password {
+                                return true;
+                            }
+                        }
                     }
                 }
             }
         }
-
-        let res = actix_web::HttpResponse::Unauthorized()
-            .finish()
-            .map_into_right_body();
-
-        Either::Right(ready(Ok(req.into_response(res))))
+        return false;
     }
+    // If config is not set, allow by default
+    true
+}
+
+pub fn unauthorized_response() -> HttpResponse {
+    HttpResponse::Unauthorized()
+        .append_header(("WWW-Authenticate", r#"Basic realm="QRush""#))
+        .finish()
 }
