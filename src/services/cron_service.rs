@@ -1,12 +1,10 @@
-// /Users/snm/ws/xsnm/ws/crates/qrush-engine/src/services/cron_service.rs
+// crates/qrush/src/services/cron_service.rs
 
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
 use tera::Context;
 use crate::cron::cron_scheduler::CronScheduler;
 use crate::services::template_service::render_template;
-use crate::cron::cron_job::CronJobMeta;
-
 
 #[derive(Deserialize)]
 pub struct CronActionRequest {
@@ -24,56 +22,20 @@ pub struct CreateCronJobRequest {
     pub payload: serde_json::Value,
 }
 
-
-
-
 pub async fn render_cron_jobs() -> impl Responder {
-    // 1) fetch from redis (this returns HashMap<String, CronJobMeta>)
-    let map = match CronScheduler::list_cron_jobs().await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!("Failed to list cron jobs: {:?}", e);
-            return HttpResponse::InternalServerError().body("Failed to list cron jobs");
+    match CronScheduler::list_cron_jobs().await {
+        Ok(cron_jobs) => {
+            let mut ctx = Context::new();
+            ctx.insert("title", "Cron Jobs");
+            ctx.insert("cron_jobs", &cron_jobs);
+            render_template("cron_jobs.html.tera", ctx).await
         }
-    };
-
-    // 2) convert map -> vec (template expects `{% for job in cron_jobs %}`)
-    let mut cron_jobs: Vec<CronJobMeta> = map
-        .into_iter()
-        .map(|(id, mut meta)| {
-            // Ensure `job.id` exists in template
-            // If CronJobMeta already has id set, this is harmless.
-            meta.id = id;
-            meta
-        })
-        .collect();
-
-    // 3) optional sort: next_run asc
-    cron_jobs.sort_by(|a, b| a.next_run.cmp(&b.next_run));
-
-    // 4) render
-    let mut ctx = Context::new();
-    ctx.insert("title", "Cron Jobs");
-    ctx.insert("cron_jobs", &cron_jobs);
-
-    render_template("cron_jobs.html.tera", ctx).await
+        Err(e) => {
+            eprintln!("Failed to fetch cron jobs: {:?}", e);
+            HttpResponse::InternalServerError().body("Failed to fetch cron jobs")
+        }
+    }
 }
-
-
-// pub async fn render_cron_jobs() -> impl Responder {
-//     match CronScheduler::list_cron_jobs().await {
-//         Ok(cron_jobs) => {
-//             let mut ctx = Context::new();
-//             ctx.insert("title", "Cron Jobs");
-//             ctx.insert("cron_jobs", &cron_jobs);
-//             render_template("cron_jobs.html.tera", ctx).await
-//         }
-//         Err(e) => {
-//             eprintln!("Failed to fetch cron jobs: {:?}", e);
-//             HttpResponse::InternalServerError().body("Failed to fetch cron jobs")
-//         }
-//     }
-// }
 
 pub async fn cron_action(payload: web::Json<CronActionRequest>) -> impl Responder {
     let action = &payload.action;
@@ -82,13 +44,13 @@ pub async fn cron_action(payload: web::Json<CronActionRequest>) -> impl Responde
     let result = match action.as_str() {
         "toggle" => {
             let enabled = payload.enabled.unwrap_or(true);
-            CronScheduler::toggle_cron_job(job_id.clone(), enabled).await
+            CronScheduler::toggle_cron_job(job_id, enabled).await
         }
         "delete" => {
-            CronScheduler::delete_cron_job(job_id.clone()).await
+            CronScheduler::delete_cron_job(job_id).await
         }
         "run_now" => {
-            match CronScheduler::run_now(job_id.clone()).await {
+            match CronScheduler::run_now(job_id).await {
                 Ok(enqueued_id) => {
                     return HttpResponse::Ok().json(serde_json::json!({
                         "status": "success",
