@@ -9,6 +9,7 @@ use redis::AsyncCommands;
 
 // Add this import for cron scheduler
 use crate::cron::cron_scheduler::CronScheduler;
+use crate::utils::constants::QUEUE_CONFIG_PREFIX;
 
 #[derive(Clone, Debug)]
 pub struct QueueConfig {
@@ -36,7 +37,7 @@ pub fn trigger_shutdown() {
 
 async fn store_queue_metadata(queue: &QueueConfig) -> anyhow::Result<()> {
     let mut conn = get_redis_conn().await?;
-    let redis_key = format!("xsm:queue:config:{}", queue.name);
+    let redis_key = format!("{QUEUE_CONFIG_PREFIX}:{}", queue.name);
     conn.hset_multiple::<_, _, _, ()>(&redis_key, &[
         ("concurrency", queue.concurrency.to_string()),
         ("priority", queue.priority.to_string()),
@@ -67,7 +68,7 @@ impl QueueConfig {
         info!("Worker Pool Started");
         for queue in &queues {
             store_queue_metadata(queue).await?;
-            let config_key = format!("xsm:queue:config:{}", queue.name);
+            let config_key = format!("{QUEUE_CONFIG_PREFIX}:{}", queue.name);
             let mut conn = get_redis_conn().await?;
             let _: () = redis::pipe()
                 .hset(&config_key, "concurrency", queue.concurrency)

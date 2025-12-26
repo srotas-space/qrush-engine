@@ -5,6 +5,7 @@ use crate::job::Job;
 use anyhow::Result;
 use serde::Serialize;
 use crate::utils::rdconfig::get_redis_connection;
+use crate::utils::constants::PREFIX_JOB;
 use redis::AsyncCommands;
 
 #[derive(Serialize, Debug, Clone)]
@@ -54,7 +55,7 @@ pub async fn deserialize_job(payload: String) -> Option<Box<dyn Job>> {
 }
 
 pub async fn fetch_job_info(job_id: &str) -> Result<Option<JobInfo>> {
-    let job_key = format!("xsm:job:{job_id}");
+    let job_key = format!("{PREFIX_JOB}:{job_id}");
     let mut conn = get_redis_connection().await?;
 
     let map: redis::RedisResult<redis::Value> = conn.hgetall(&job_key).await;

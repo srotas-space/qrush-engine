@@ -13,10 +13,12 @@ use crate::cron::cron_parser::CronParser;
 use crate::cron::cron_job::CronJobMeta;
 // Import the CronJob trait
 use crate::cron::cron_job::CronJob;
-
-const CRON_JOBS_KEY: &str = "snm:cron:jobs";
-const CRON_SCHEDULE_KEY: &str = "snm:cron:schedule";
-const CLAIM_BATCH_LIMIT: i64 = 100; // per tick
+use crate::utils::constants::{
+    CRON_JOBS_KEY,
+    CRON_SCHEDULE_KEY,
+    CLAIM_BATCH_LIMIT,
+    QUEUES_SET,
+};
 
 pub struct CronScheduler;
 
@@ -117,7 +119,7 @@ return ids
         let script = Script::new(CLAIM_SCRIPT);
         let due_jobs: Vec<String> = script.key(CRON_SCHEDULE_KEY)
             .arg(now_ts)
-            .arg(CLAIM_BATCH_LIMIT)
+            .arg(CLAIM_BATCH_LIMIT as i64)
             .invoke_async(&mut conn).await?;
 
         for job_id in due_jobs {
@@ -224,7 +226,7 @@ return ids
 
         // Add to queue
         conn.rpush::<_, _, ()>(&queue_key, &job_id).await?;
-        conn.sadd::<_, _, ()>("snm:queues", queue).await?;
+        conn.sadd::<_, _, ()>(QUEUES_SET, queue).await?;
 
         Ok(job_id)
     }

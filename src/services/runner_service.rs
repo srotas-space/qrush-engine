@@ -1,11 +1,17 @@
-
+// /Users/snm/ws/xsnm/ws/crates/qrush-engine/src/services/runner_service.rs
 use crate::{registry::get_registered_jobs, config::get_shutdown_notify};
 use crate::utils::rdconfig::get_redis_connection;
 use tokio::time::{sleep, Duration};
 use redis::AsyncCommands;
 use chrono::Utc;
 use futures::FutureExt; // Required for `.now_or_never()`
-use crate::utils::constants::{DELAYED_JOBS_KEY, MAX_RETRIES};
+use crate::utils::constants::{
+    DELAYED_JOBS_KEY, MAX_RETRIES, PREFIX_QUEUE, PREFIX_JOB,
+    COUNTER_SUCCESS, COUNTER_FAILED, COUNTER_TOTAL_JOBS,
+    SUCCESS_LIST_PREFIX, FAILED_LIST_PREFIX, RETRY_LIST_PREFIX,
+    STATS_JOBS_PREFIX, STATS_JOBS_FAILED_PREFIX, LOGS_PREFIX,
+    FAILED_JOBS_LIST,
+};
 
 
 
@@ -33,12 +39,12 @@ pub async fn start_worker_pool(queue: &str, concurrency: usize) {
                 };
 
                 let job_id: Option<String> = conn
-                    .lpop(format!("xsm:queue:{}", queue), None)
+                    .lpop(format!("{PREFIX_QUEUE}:{}", queue), None)
                     .await
                     .unwrap_or(None);
 
                 if let Some(job_id) = job_id {
-                    let job_key = format!("xsm:job:{}", job_id);
+                    let job_key = format!("{PREFIX_JOB}:{}", job_id);
                     let job_payload: String = conn.hget(&job_key, "payload").await.unwrap_or_default();
 
                     let jobs = get_registered_jobs();
@@ -64,20 +70,20 @@ pub async fn start_worker_pool(queue: &str, concurrency: usize) {
                                             ("status", "success"),
                                             ("completed_at", &Utc::now().to_rfc3339()),
                                         ]).await.unwrap_or_default();
-                                        let _: () = conn.incr("xsm:qrush:success", 1).await.unwrap_or_default();
+                                        let _: () = conn.incr(COUNTER_SUCCESS, 1).await.unwrap_or_default();
                                         // Track success jobs
-                                        let _: () = conn.rpush(format!("xsm:success:{}", queue), &job_id).await.unwrap_or_default();
+                                        let _: () = conn.rpush(format!("{SUCCESS_LIST_PREFIX}:{}", queue), &job_id).await.unwrap_or_default();
 
-                                        let key = format!("xsm:stats:jobs:{}", today);
+                                        let key = format!("{STATS_JOBS_PREFIX}:{}", today);
                                         // increment daily success counter
                                         let _: () = conn.incr(&key, 1).await.unwrap_or_default();
-                                        let _: () = conn.incr("xsm:qrush:total_jobs", 1).await.unwrap_or_default();
+                                        let _: () = conn.incr(COUNTER_TOTAL_JOBS, 1).await.unwrap_or_default();
 
                                     }
                                     Err(err) => {
                                         let _ = job.on_error(&err).await;
                                         let retries: i64 = conn.hincr(&job_key, "retries", 1).await.unwrap_or(1);
-                                        let _: () = conn.rpush(format!("xsm:retry:{}", queue), &job_id).await.unwrap_or_default();
+                                        let _: () = conn.rpush(format!("{RETRY_LIST_PREFIX}:{}", queue), &job_id).await.unwrap_or_default();
                                         if retries <= MAX_RETRIES as i64 {
                                             let backoff = 10 * retries;
                                             let now = Utc::now().timestamp();
@@ -108,7 +114,7 @@ pub async fn start_worker_pool(queue: &str, concurrency: usize) {
                             hset_data.push(("error", emsg.clone()));
                         }
 
-                        let fail_key = format!("xsm:stats:jobs:{}:failed", today);
+                        let fail_key = format!("{STATS_JOBS_FAILED_PREFIX}:{}:failed", today);
                         // increment daily failed counter
                         let _: () = conn.incr(&fail_key, 1).await.unwrap_or_default();
 
@@ -116,15 +122,15 @@ pub async fn start_worker_pool(queue: &str, concurrency: usize) {
                         let _: () = conn.hset_multiple(&job_key, &hset_data).await.unwrap_or_default();
                         
                         let _: Result<(), _> = conn.lpush(
-                            format!("xsm:logs:{}", queue),
+                            format!("{LOGS_PREFIX}:{}", queue),
                             format!("[{}] ❌ Job {} failed", Utc::now(), job_id),
                         ).await;
-                        let _: Result<(), _> = conn.ltrim(format!("xsm:logs:{}", queue), 0, 99).await;
-                        let _: () = conn.rpush("xsm:failed_jobs", &job_id).await.unwrap_or_default();
+                        let _: Result<(), _> = conn.ltrim(format!("{LOGS_PREFIX}:{}", queue), 0, 99).await;
+                        let _: () = conn.rpush(FAILED_JOBS_LIST, &job_id).await.unwrap_or_default();
                         let _: () = conn.hset(&job_key, "job_name", jobs.keys().next().unwrap_or(&"unknown")).await.unwrap_or_default();
                         // Track failed jobs
-                        let _: () = conn.rpush(format!("xsm:failed:{}", queue), &job_id).await.unwrap_or_default();
-                        let _: () = conn.incr("xsm:qrush:failed", 1).await.unwrap_or_default();
+                        let _: () = conn.rpush(format!("{FAILED_LIST_PREFIX}:{}", queue), &job_id).await.unwrap_or_default();
+                        let _: () = conn.incr(COUNTER_FAILED, 1).await.unwrap_or_default();
                     }
                 }
 
@@ -149,7 +155,7 @@ pub async fn start_delayed_worker_pool() {
 
             let jobs: Vec<String> = conn.zrangebyscore(DELAYED_JOBS_KEY, 0, now).await.unwrap_or_default();
             for job_str in jobs {
-                let _: () = conn.lpush("xsm:queue:default", &job_str).await.unwrap_or_default();
+                let _: () = conn.lpush(format!("{PREFIX_QUEUE}:default"), &job_str).await.unwrap_or_default();
                 let _: () = conn.zrem(DELAYED_JOBS_KEY, &job_str).await.unwrap_or_default();
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
